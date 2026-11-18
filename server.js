@@ -252,10 +252,19 @@ app.post('/api/admin/requests/:id/review', requireAuth, requireAdmin, (req, res)
   const decision = String(req.body.decision || '');
   const note = String(req.body.note || '').trim().slice(0, 300);
   if (!['approved','rejected'].includes(decision)) return res.status(400).json({ error: 'قرار المراجعة غير صحيح.' });
-  const result = db.prepare("UPDATE server_requests SET status=?,admin_note=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'")
-    .run(decision, note, Number(req.params.id));
-  if (!result.changes) return res.status(404).json({ error: 'الطلب مش موجود أو تمت مراجعته.' });
-  res.json({ ok: true, message: decision === 'approved' ? 'تمت الموافقة على الطلب.' : 'تم رفض الطلب.' });
+  const request = db.prepare("SELECT * FROM server_requests WHERE id=? AND status='pending'").get(Number(req.params.id));
+  if (!request) return res.status(404).json({ error: 'الطلب مش موجود أو تمت مراجعته.' });
+  const applyReview = db.transaction(() => {
+    db.prepare("UPDATE server_requests SET status=?,admin_note=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(decision, note, request.id);
+    if (decision === 'approved') {
+      db.prepare("INSERT INTO projects(user_id,name,runtime) VALUES(?,?,?)")
+        .run(request.user_id, request.name, request.template);
+    }
+    audit(req.user.id, 'request.' + decision, request.id);
+  });
+  applyReview();
+  res.json({ ok: true, message: decision === 'approved' ? 'تمت الموافقة وإنشاء مساحة المشروع.' : 'تم رفض الطلب.' });
 });
 
 
