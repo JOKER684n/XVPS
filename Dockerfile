@@ -6,7 +6,7 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV DB_PATH=/data/song-host.sqlite
+ENV DB_PATH=/home/song/song-host-data/song-host.sqlite
 
 RUN apt update -y && apt install -y software-properties-common curl ca-certificates gnupg && \
     add-apt-repository ppa:deadsnakes/ppa -y && \
