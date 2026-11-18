@@ -75,6 +75,7 @@ async function loadApp(user) {
   $('#adminBanner').classList.toggle('hidden', user.role !== 'admin');
   $('#adminPanel').classList.toggle('hidden', user.role !== 'admin');
   await refreshDashboard();
+  await refreshProjects();
   if (user.role === 'admin') await refreshAdmin();
 }
 async function refreshDashboard() {
@@ -106,6 +107,58 @@ async function refreshAdmin() {
   const users = data.users.filter(u => u.status === 'pending');
   $('#adminUsers').innerHTML = users.length ? users.map(u => '<article class="review-row"><div class="review-main"><b>' + escapeHtml(u.name) + '</b><small>' + escapeHtml(u.email) + '</small></div><span class="badge pending">محتاج تفعيل</span><button class="btn btn-small btn-primary" data-user-approve="' + u.id + '">تفعيل الحساب</button></article>').join('') : '<div class="empty-state compact">مفيش حسابات مستنية التفعيل.</div>';
 }
+
+let activeProjectId = null;
+async function refreshProjects() {
+  const data = await api('/api/projects');
+  const list = $('#projectList');
+  if (!data.projects.length) {
+    list.innerHTML = '<div class="empty-state compact">مفيش مشاريع لسه. اضغط مشروع جديد للبدء.</div>';
+    return;
+  }
+  list.innerHTML = data.projects.map(p => '<article class="project-row"><div class="server-symbol">⌘</div><div class="server-info"><b>'+escapeHtml(p.name)+'</b><small>'+p.runtime+' · '+p.file_count+' ملف · '+new Date(p.updated_at+'Z').toLocaleString('ar-EG')+'</small></div><button class="btn btn-primary btn-small" data-open-project="'+p.id+'" data-project-name="'+escapeHtml(p.name)+'">الملفات</button><button class="btn btn-danger btn-small" data-delete-project="'+p.id+'">حذف</button></article>').join('');
+}
+async function openProject(id,name) {
+  activeProjectId=id;
+  $('#workspaceTitle').textContent='ملفات: '+name;
+  $('#fileWorkspace').classList.remove('hidden');
+  $('#filePath').value='index.txt'; $('#fileContent').value='';
+  const data=await api('/api/projects/'+id+'/files');
+  const first=data.files[0];
+  if(first){$('#filePath').value=first.file_path;await readProjectFile();}
+}
+async function readProjectFile() {
+  if(!activeProjectId) return;
+  const path=$('#filePath').value.trim();
+  const data=await api('/api/projects/'+activeProjectId+'/files/read?path='+encodeURIComponent(path));
+  $('#fileContent').value=data.content;
+}
+$('#createProject').addEventListener('click',async()=>{
+  const name=prompt('اسم المشروع:'); if(!name) return;
+  const runtime=prompt('النوع: node20 أو python311 أو static','node20');
+  if(!runtime) return;
+  try{const d=await api('/api/projects',{method:'POST',body:{name,runtime}});showToast(d.message);await refreshProjects();}
+  catch(e){showToast(e.message,true);}
+});
+$('#projectList').addEventListener('click',async e=>{
+  const open=e.target.closest('[data-open-project]'), del=e.target.closest('[data-delete-project]');
+  try{
+    if(open) await openProject(open.dataset.openProject,open.dataset.projectName);
+    if(del && confirm('تحذف المشروع وكل ملفاته نهائياً؟')){await api('/api/projects/'+del.dataset.deleteProject,{method:'DELETE',body:{}});showToast('تم حذف المشروع');await refreshProjects();$('#fileWorkspace').classList.add('hidden');}
+  }catch(err){showToast(err.message,true);}
+});
+$('#closeWorkspace').addEventListener('click',()=>{$('#fileWorkspace').classList.add('hidden');activeProjectId=null;});
+$('#newFile').addEventListener('click',async()=>{try{await readProjectFile();}catch(e){$('#fileContent').value='';}});
+$('#saveFile').addEventListener('click',async()=>{
+  try{const d=await api('/api/projects/'+activeProjectId+'/files',{method:'PUT',body:{path:$('#filePath').value,content:$('#fileContent').value}});showToast(d.message);await refreshProjects();}
+  catch(e){showToast(e.message,true);}
+});
+$('#deleteFile').addEventListener('click',async()=>{
+  if(!activeProjectId||!confirm('تحذف الملف الحالي؟'))return;
+  try{await api('/api/projects/'+activeProjectId+'/files',{method:'DELETE',body:{path:$('#filePath').value}});$('#fileContent').value='';showToast('تم حذف الملف');await refreshProjects();}
+  catch(e){showToast(e.message,true);}
+});
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
