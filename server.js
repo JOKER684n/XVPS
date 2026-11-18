@@ -10,7 +10,7 @@ const path = require('path');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'song-host.sqlite');
+const DB_PATH = process.env.DB_PATH || '/home/song/song-host-data/song-host.sqlite';
 const fs = require('fs');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
