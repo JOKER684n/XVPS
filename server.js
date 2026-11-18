@@ -33,6 +33,31 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','blocked')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    runtime TEXT NOT NULL CHECK(runtime IN ('node20','python311','static')),
+    status TEXT NOT NULL DEFAULT 'stopped' CHECK(status IN ('stopped','draft')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS project_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id,file_path)
+  );
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS server_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -231,6 +256,91 @@ app.post('/api/admin/requests/:id/review', requireAuth, requireAdmin, (req, res)
     .run(decision, note, Number(req.params.id));
   if (!result.changes) return res.status(404).json({ error: 'الطلب مش موجود أو تمت مراجعته.' });
   res.json({ ok: true, message: decision === 'approved' ? 'تمت الموافقة على الطلب.' : 'تم رفض الطلب.' });
+});
+
+
+function audit(actor, action, target='') {
+  db.prepare('INSERT INTO audit_logs(actor_id,action,target) VALUES(?,?,?)').run(actor || null, action, String(target).slice(0,180));
+}
+function ownedProject(req, res, next) {
+  const project = db.prepare('SELECT * FROM projects WHERE id=? AND user_id=?').get(Number(req.params.id), req.user.id);
+  if (!project) return res.status(404).json({ error: 'المشروع غير موجود.' });
+  req.project = project; next();
+}
+function cleanFilePath(input) {
+  const value = String(input || '').replace(/\\/g, '/').trim();
+  if (!value || value.length > 180 || value.startsWith('/') || value.includes('\0')) return null;
+  const parts = value.split('/');
+  if (parts.some(p => !p || p === '.' || p === '..' || !/^[\p{L}\p{N}._ -]+$/u.test(p))) return null;
+  return parts.join('/');
+}
+app.get('/api/projects', requireAuth, (req,res) => {
+  const projects = db.prepare('SELECT p.*, (SELECT COUNT(*) FROM project_files f WHERE f.project_id=p.id) file_count FROM projects p WHERE user_id=? ORDER BY id DESC').all(req.user.id);
+  res.json({ projects });
+});
+app.post('/api/projects', requireAuth, requestLimiter, (req,res) => {
+  const name=String(req.body.name||'').trim(), runtime=String(req.body.runtime||'');
+  if(name.length<2||name.length>40||!['node20','python311','static'].includes(runtime)) return res.status(400).json({error:'بيانات المشروع غير صحيحة.'});
+  if(db.prepare('SELECT COUNT(*) n FROM projects WHERE user_id=?').get(req.user.id).n>=10) return res.status(429).json({error:'وصلت للحد الأقصى: 10 مشاريع.'});
+  const r=db.prepare('INSERT INTO projects(user_id,name,runtime) VALUES(?,?,?)').run(req.user.id,name,runtime);
+  audit(req.user.id,'project.create',r.lastInsertRowid);
+  res.status(201).json({ok:true,id:r.lastInsertRowid,message:'تم إنشاء مساحة المشروع. تقدر ترفع وتدير ملفاته.'});
+});
+app.get('/api/projects/:id/files', requireAuth, ownedProject, (req,res) => {
+  res.json({files:db.prepare('SELECT file_path, length(content) AS size, updated_at FROM project_files WHERE project_id=? ORDER BY file_path').all(req.project.id)});
+});
+app.get('/api/projects/:id/files/read', requireAuth, ownedProject, (req,res) => {
+  const file=cleanFilePath(req.query.path);
+  if(!file) return res.status(400).json({error:'مسار الملف غير صالح.'});
+  const row=db.prepare('SELECT content FROM project_files WHERE project_id=? AND file_path=?').get(req.project.id,file);
+  if(!row) return res.status(404).json({error:'الملف غير موجود.'});
+  res.json({path:file,content:row.content});
+});
+app.put('/api/projects/:id/files', requireAuth, ownedProject, (req,res) => {
+  const file=cleanFilePath(req.body.path), content=String(req.body.content??'');
+  if(!file) return res.status(400).json({error:'مسار الملف غير صالح.'});
+  if(content.length>24000) return res.status(413).json({error:'الملف أكبر من الحد المسموح (24KB).'});
+  const used=db.prepare('SELECT COALESCE(SUM(length(content)),0) n FROM project_files WHERE project_id=? AND file_path!=?').get(req.project.id,file).n;
+  if(used+content.length>500000) return res.status(413).json({error:'مساحة المشروع النصية وصلت إلى 500KB.'});
+  db.prepare(`INSERT INTO project_files(project_id,file_path,content) VALUES(?,?,?)
+    ON CONFLICT(project_id,file_path) DO UPDATE SET content=excluded.content,updated_at=CURRENT_TIMESTAMP`).run(req.project.id,file,content);
+  db.prepare("UPDATE projects SET updated_at=CURRENT_TIMESTAMP WHERE id=?").run(req.project.id);
+  audit(req.user.id,'file.save',req.project.id+':'+file);
+  res.json({ok:true,message:'تم حفظ الملف.'});
+});
+app.delete('/api/projects/:id/files', requireAuth, ownedProject, (req,res) => {
+  const file=cleanFilePath(req.body.path);
+  if(!file) return res.status(400).json({error:'مسار الملف غير صالح.'});
+  const result=db.prepare('DELETE FROM project_files WHERE project_id=? AND file_path=?').run(req.project.id,file);
+  if(!result.changes) return res.status(404).json({error:'الملف غير موجود.'});
+  audit(req.user.id,'file.delete',req.project.id+':'+file);
+  res.json({ok:true});
+});
+app.delete('/api/projects/:id', requireAuth, (req,res) => {
+  const project=db.prepare('SELECT id FROM projects WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);
+  if(!project) return res.status(404).json({error:'المشروع غير موجود.'});
+  db.prepare('DELETE FROM projects WHERE id=?').run(project.id); audit(req.user.id,'project.delete',project.id);
+  res.json({ok:true});
+});
+app.get('/api/admin/logs', requireAuth, requireAdmin, (req,res) => {
+  const logs=db.prepare('SELECT l.*,u.name AS actor_name FROM audit_logs l LEFT JOIN users u ON u.id=l.actor_id ORDER BY l.id DESC LIMIT 100').all();
+  res.json({logs});
+});
+app.post('/api/admin/users/:id/status', requireAuth, requireAdmin, (req,res) => {
+  const id=Number(req.params.id), status=String(req.body.status||'');
+  if(id===req.user.id || !['active','blocked'].includes(status)) return res.status(400).json({error:'الإجراء غير مسموح.'});
+  const result=db.prepare("UPDATE users SET status=? WHERE id=? AND role!='admin'").run(status,id);
+  if(!result.changes) return res.status(404).json({error:'المستخدم غير موجود أو لا يمكن تعديله.'});
+  audit(req.user.id,'user.'+status,id); res.json({ok:true});
+});
+app.delete('/api/admin/projects/:id', requireAuth, requireAdmin, (req,res) => {
+  const id=Number(req.params.id), result=db.prepare('DELETE FROM projects WHERE id=?').run(id);
+  if(!result.changes) return res.status(404).json({error:'المشروع غير موجود.'});
+  audit(req.user.id,'admin.project.delete',id); res.json({ok:true});
+});
+app.get('/api/admin/projects', requireAuth, requireAdmin, (req,res) => {
+  const projects=db.prepare('SELECT p.*,u.name user_name,u.email user_email FROM projects p JOIN users u ON u.id=p.user_id ORDER BY p.id DESC LIMIT 200').all();
+  res.json({projects});
 });
 
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
