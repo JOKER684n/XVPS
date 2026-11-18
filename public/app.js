@@ -50,11 +50,12 @@ $('#loginForm').addEventListener('submit', async (e) => {
 });
 $('#registerForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const form = new FormData(e.currentTarget);
+  const formElement = e.currentTarget;
+  const form = new FormData(formElement);
   try {
     const data = await api('/api/auth/register', { method: 'POST', body: Object.fromEntries(form) });
     message($('#authMessage'), data.message, false);
-    e.currentTarget.reset();
+    formElement.reset();
   } catch (err) { message($('#authMessage'), err.message, true); }
 });
 $('#logoutBtn').addEventListener('click', async () => {
@@ -129,13 +130,14 @@ $('#closeModal').addEventListener('click', () => modal.classList.add('hidden'));
 modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
 $('#requestForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const form = new FormData(e.currentTarget);
+  const formElement = e.currentTarget;
+  const form = new FormData(formElement);
   const values = Object.fromEntries(form);
   values.ram = Number(values.ram); values.cpu = Number(values.cpu);
   try {
     const data = await api('/api/servers/request', { method: 'POST', body: values });
     message($('#requestMessage'), data.message, false);
-    e.currentTarget.reset(); await refreshDashboard();
+    formElement.reset(); await refreshDashboard();
     if (currentUser && currentUser.role === 'admin') await refreshAdmin();
   } catch (err) { message($('#requestMessage'), err.message, true); }
 });
