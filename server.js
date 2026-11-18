@@ -164,10 +164,10 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
 });
 
 app.get('/api/me', (req, res) => {
-  if (!req.session.userId) return res.json({ user: null, csrfToken: null });
-  const user = safeUser(req.session.userId);
-  if (!user || user.status !== 'active') return res.json({ user: null, csrfToken: null });
   if (!req.session.csrfToken) req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
+  if (!req.session.userId) return res.json({ user: null, csrfToken: req.session.csrfToken });
+  const user = safeUser(req.session.userId);
+  if (!user || user.status !== 'active') return res.json({ user: null, csrfToken: req.session.csrfToken });
   res.json({ user, csrfToken: req.session.csrfToken });
 });
 
