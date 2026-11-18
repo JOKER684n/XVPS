@@ -59,6 +59,16 @@
         </section>
         <aside class="panel side-panel"><div class="panel-head"><div><h2>مركز المساعدة</h2><p>معلومات مهمة</p></div><span class="help-icon">?</span></div><div class="help-item"><b>مراجعة الطلبات</b><p>كل طلب إنشاء بيتم مراجعته من الإدارة قبل الموافقة.</p></div><div class="help-item"><b>الموارد</b><p>اختيارات الموارد المتاحة بتظهر في نموذج الطلب.</p></div><div class="help-item"><b>حالة المنصة</b><p><span class="inline-dot"></span> واجهة المنصة متصلة</p></div></aside>
       </div>
+      <section class="panel workspace-panel">
+        <div class="panel-head"><div><h2>مساحات المشاريع</h2><p>إنشاء المشاريع وإدارة ملفاتها النصية</p></div><button id="createProject" class="btn btn-primary">＋ مشروع جديد</button></div>
+        <div id="projectList" class="project-list"><div class="empty-state compact">جاري تحميل المشاريع...</div></div>
+        <div id="fileWorkspace" class="file-workspace hidden">
+          <div class="workspace-head"><b id="workspaceTitle">ملفات المشروع</b><button id="closeWorkspace" class="btn btn-ghost btn-small">إغلاق</button></div>
+          <div class="file-tools"><input id="filePath" placeholder="مثال: src/index.js"><button id="newFile" class="btn btn-ghost btn-small">فتح / ملف جديد</button><button id="saveFile" class="btn btn-primary btn-small">حفظ الملف</button><button id="deleteFile" class="btn btn-danger btn-small">حذف</button></div>
+          <textarea id="fileContent" class="file-editor" spellcheck="false" placeholder="اكتب محتوى الملف هنا..."></textarea>
+          <small class="form-hint">ملاحظة: دي مساحة ملفات نصية فقط. تشغيل أكواد المستخدمين غير متاح في بيئة الكونتينر الحالية.</small>
+        </div>
+      </section>
       <section id="adminPanel" class="panel admin-panel hidden">
         <div class="panel-head"><div><h2>إدارة المنصة</h2><p>مراجعة طلبات المستخدمين والتحكم في الحسابات</p></div><span class="admin-tag">ADMIN TOOLS</span></div>
         <div class="admin-stats" id="adminCounts"></div>
